@@ -20,6 +20,12 @@
 /* New VAB Certificate Magic Number from SDM SPEC 1.5 */
 #define VAB_CERT_MAGIC_NUM	0x52619311
 
+#define MULTI_ROOT_ENTRY_MAGIC_NUM 0x36733624
+#define PUBLIC_KEY_MAGIC_NUM 0x40656643
+#define PUBLIC_KEY_SECP256R1 0x21339360
+#define PUBLIC_KEY_SECP384R1 0x54326648
+#define PUBLIC_KEY_BP384R1   0x38183011
+
 #define SHA256_SZ		32
 #define SHA384_SZ		48
 #define FCS_MAX_COUNTERS	5
@@ -44,6 +50,55 @@
 
 #define FCS_CS_KEY_OBJECT_MAGIC_WORD		0x43736B4F
 #define FCS_CS_KEY_OBJECT_DATA_MAGIC_WORD	0x43736B64
+
+/*
+ * struct fcs_multi_root_entry_data
+ * @magic_num: Magic Number (0x36733624)
+ * @length: Length. Defined as offset to the next entry in signature chain,
+ *	including the block header.
+ * @data_length: Data length. Write as (8 + SUM (0x18 + XSIZE * 2)).
+ *  Note: Different keys may differ in the XYSIZE values.
+ * @sig_length: Signature length. Write as 0
+ * @rsv0: Reserved (write as 0)
+ * @root_hash_sel: 0: Altera, 1: User root # 0
+ * @msw_pub_hash: Most significant word of SHA384 hash of a public key(s)
+ * @pub_key_sel: Public key selection. Defined as offset from 0x20 offset to the
+ *	magic number for the selected key.
+ * @pub_key_magic_num: Public key # 0 magic number 0x40656643
+ * @pub_key_fuse_enblmnt: Public key # 0 fuse enablement. Write as 0
+ * @pub_key_fuse_contrib: Public key # 0 fuse contribution. Write as 0xFFFFFFFF
+ * @pub_key_curve: •Public key # 0 curve magic number. Write as:
+ *	0x21339360 for secp256r1
+ *	0x54326648 for secp384r1
+ *	0x38183011 for brainpoolP384r1
+ * @pub_key_permissions: Public key permissions. Write as 0xFFFFFFFF
+ * @pub_key_cancel: Public key # 0 cancellations. Write as 0xFFFFFFFF
+ * @pub_key0_data: Public key # 0 X in big endian format
+ * @pub_key1_data: Public key # 1 X in big endian format
+ */
+ struct fcs_multi_root_entry_data {
+	uint32_t magic_num;
+	uint32_t length;
+	uint32_t data_length;
+	uint32_t sig_length;
+	uint32_t rsv0;
+	uint32_t root_hash_sel;
+	uint32_t msw_pub_hash;
+	uint32_t pub_key_sel;
+	union {
+		struct {
+			uint32_t pub_key_magic_num;
+			uint32_t pub_key_fuse_enblmnt;
+			uint32_t pub_key_fuse_contrib;
+			uint32_t pub_key_curve;
+			uint32_t pub_key_permissions;
+			uint32_t pub_key_cancel;
+			uint8_t pub_key0_data[SHA384_SZ];
+			uint8_t pub_key1_data[SHA384_SZ];
+		};
+		uint8_t key_data[4*6 + 2*SHA384_SZ];
+	};
+};
 
 /*
  * struct fcs_hps_generic_header

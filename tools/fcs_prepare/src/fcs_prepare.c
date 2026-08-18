@@ -564,9 +564,11 @@ static int fcs_prepare_counter(uint8_t counter_select, uint32_t counter_val,
  *
  */
 static int fcs_prepare_key(int key_type, int key_id,
-			   char *filename, bool verbose)
+			   char *filename, char *qkyfile, bool verbose)
 {
 	struct fcs_counter_set_data fcs_data;
+	struct fcs_multi_root_entry_data fcs_entry;
+	struct sha384_ctx sha384;
 	int ret;
 	uint32_t i;
 	FILE *fp;
@@ -582,37 +584,77 @@ static int fcs_prepare_key(int key_type, int key_id,
 	/* User type requires a Root Hash */
 	if (key_type == FCS_USER_KEY) {
 		struct stat st;
-		int hash_sz, filesz;
-
-		if (!filename) {
-			fprintf(stderr, "NULL filename:  %s\n", strerror(errno));
+		int hash_sz, filesz, entry_sz;
+		
+		if (!filename && !qkyfile) {
+			fprintf(stderr, "NULL filename and qkyfile:  %s\n", strerror(errno));
 			return -1;
 		}
+		if (qkyfile) {
+			if (verbose)
+				printf("%s[%d] qkyfile=%s\n", __func__, __LINE__, qkyfile);
 
-		if (verbose)
-			printf("%s[%d] filename=%s\n", __func__, __LINE__, filename);
+			fp = fopen(qkyfile, "rbx");
+			if (!fp) {
+				fprintf(stderr, "Unable to open file %s:  %s\n",
+					qkyfile, strerror(errno));
+				return -1;
+			}
+			/* Get the file statistics */
+			if (fstat(fileno(fp), &st)) {
+				fclose(fp);
+				fprintf(stderr, "Unable to open file %s:  %s\n",
+					filename, strerror(errno));
+				return -1;
+			}
+			filesz = st.st_size;
 
-		fp = fopen(filename, "rbx");
-		if (!fp) {
-			fprintf(stderr, "Unable to open file %s:  %s\n",
-				filename, strerror(errno));
-			return -1;
-		}
-		/* Get the file statistics */
-		if (fstat(fileno(fp), &st)) {
+			fseek(fp, 0, SEEK_CUR);
+			entry_sz = fread(&fcs_entry, 1, sizeof(fcs_entry), fp);
 			fclose(fp);
-			fprintf(stderr, "Unable to open file %s:  %s\n",
-				filename, strerror(errno));
-			return -1;
-		}
-		filesz = st.st_size;
+			if ((entry_sz != filesz) || (entry_sz != sizeof(fcs_entry))) {
+				fprintf(stderr, "Qky file is incorrect size %d\n", filesz);
+				return -1;
+			}
+			if (fcs_entry.magic_num != MULTI_ROOT_ENTRY_MAGIC_NUM) {
+				fprintf(stderr, "Qky file is not a valid multi root entry file\n");
+				return -1;
+			}
+			if (fcs_entry.root_hash_sel != 1) {
+				fprintf(stderr, "User root hash is not selected\n");
+				return -1;
+			}
 
-		fseek(fp, 0, SEEK_CUR);
-		hash_sz = fread(fcs_data.root_hash, 1, sizeof(fcs_data.root_hash), fp);
-		fclose(fp);
-		if ((hash_sz != filesz) || (hash_sz != SHA384_SZ)) {
-			fprintf(stderr, "Roothash file is incorrect size %d\n", filesz);
-			return -1;
+			sha384_init(&sha384);
+			sha384_update(&sha384, sizeof(fcs_entry.key_data), fcs_entry.key_data);
+			sha384_digest(&sha384, SHA384_SZ, fcs_data.root_hash);
+		}
+		else {
+			if (verbose)
+				printf("%s[%d] filename=%s\n", __func__, __LINE__, filename);
+
+			fp = fopen(filename, "rbx");
+			if (!fp) {
+				fprintf(stderr, "Unable to open file %s:  %s\n",
+					filename, strerror(errno));
+				return -1;
+			}
+			/* Get the file statistics */
+			if (fstat(fileno(fp), &st)) {
+				fclose(fp);
+				fprintf(stderr, "Unable to open file %s:  %s\n",
+					filename, strerror(errno));
+				return -1;
+			}
+			filesz = st.st_size;
+
+			fseek(fp, 0, SEEK_CUR);
+			hash_sz = fread(fcs_data.root_hash, 1, sizeof(fcs_data.root_hash), fp);
+			fclose(fp);
+			if ((hash_sz != filesz) || (hash_sz != SHA384_SZ)) {
+				fprintf(stderr, "Roothash file is incorrect size %d\n", filesz);
+				return -1;
+			}
 		}
 
 		if (verbose) {

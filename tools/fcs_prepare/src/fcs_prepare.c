@@ -90,9 +90,10 @@ static void fcs_prepare_usage(void)
 	       "if counter_value=-1 and counter_set=1-5, then can update the selected counter w/o signed certificate\n");
 	printf("  Output result is saved in filenames = %s %s\n\n", OUTPUT_CERT_NAME, OUTPUT_CERT_NAME_S15);
 
-	printf("%-32s  %s  %s", "-K|--key -k|--key_type <user(0)/intel(1)> -i|--key_id <key_id> [-r|--roothash <filename>]\n",
+	printf("%-32s  %s  %s  %s", "-K|--key -k|--key_type <user(0)/intel(1)> -i|--key_id <key_id> [-r|--roothash <filename>] | [-q|--qky <filename>]\n",
 	       "Create the unsigned certificate for a Key Cancellation command.\n",
-	       "For User Key, roothash selects User Root Hash, Key ID can be 0 to 31.\n");
+	       "For User Key, roothash selects User Root Hash, Key ID can be 0 to 31.\n",
+	       "If qky file is provided, the roothash will be extracted from the qky file.\n");
 	printf("  Output result is saved in filenames = %s %s\n\n", OUTPUT_CERT_NAME, OUTPUT_CERT_NAME_S15);
 
 	printf("%-32s  %s  %s", "-F|--finish <signed_certificate> [-f|--imagefile <HPS_image_filename>]\n",
@@ -242,14 +243,14 @@ static int fcs_finish_cert(char *cert_filename, char *image_filename, bool verbo
 			fclose(fpi);
 			return -1;
 		}
-		image_sz = st.st_size;
-		/* filesize must be on a word boundary */
-		if (image_sz % BYTES_PER_TWO_WORDS) {
-			pad = BYTES_PER_TWO_WORDS - (image_sz % BYTES_PER_TWO_WORDS);
-			printf("%s[%d] filesize not on word boundary. Padding with %d bytes\n",
-				__func__, __LINE__, pad);
-		}
-		padded_sz = image_sz + pad;
+		// image_sz = st.st_size;
+		// /* filesize must be on a word boundary */
+		// if (image_sz % BYTES_PER_TWO_WORDS) {
+		// 	pad = BYTES_PER_TWO_WORDS - (image_sz % BYTES_PER_TWO_WORDS);
+		// 	printf("%s[%d] filesize not on word boundary. Padding with %d bytes\n",
+		// 		__func__, __LINE__, pad);
+		// }
+		padded_sz = image_sz;
 
 		/* Allocate a buffer and read the file into the buffer */
 		hps_buff = calloc(padded_sz, sizeof(uint8_t));
@@ -448,13 +449,13 @@ static int fcs_prepare_image(char *filename, int fcs_type, bool verbose)
 				filesize, filesize);
 
 		/* filesize must be on a word boundary */
-		if (filesize % BYTES_PER_TWO_WORDS) {
-			pad = BYTES_PER_TWO_WORDS - (filesize % BYTES_PER_TWO_WORDS);
+		// if (filesize % BYTES_PER_TWO_WORDS) {
+		// 	pad = BYTES_PER_TWO_WORDS - (filesize % BYTES_PER_TWO_WORDS);
 
-			printf("%s[%d] filesize not on word boundary. Padding with %d bytes\n",
-				__func__, __LINE__, pad);
-		}
-		padded_sz = filesize + pad;
+		// 	printf("%s[%d] filesize not on word boundary. Padding with %d bytes\n",
+		// 		__func__, __LINE__, pad);
+		// }
+		padded_sz = filesize;
 
 		memset(&fcs_data, 0, sizeof(fcs_data));
 		/* Allocate a buffer and read the file into the buffer */
@@ -958,15 +959,16 @@ static void error_exit(char *msg)
 int main(int argc, char *argv[])
 {
 	bool verbose = false;
-	char *filename = NULL, *hpsfile =  NULL, *textfile = NULL;
+	char *filename = NULL, *hpsfile =  NULL, *textfile = NULL, *qkyfile = NULL;
 	unsigned int key_usage = 0;
 	int key_id = -1;
+	bool key_id_set = false;
 	int key_type = -1, key_size = 0, key_obj_ver = 0;
 	int counter_val = -1, counter_sel = -1;
 	int index = 0, type = 0;
 	int c;
 
-	while ((c = getopt_long(argc, argv, "hvH:CKc:i:k:r:s:F:f:G:g:P:x:u:t:",
+	while ((c = getopt_long(argc, argv, "hvH:CKc:i:k:r:s:F:f:G:g:P:x:u:t:q:",
 				opts, &index)) != -1) {
 		switch (c) {
 		case 'H':
@@ -1020,9 +1022,10 @@ int main(int argc, char *argv[])
 			}
 			break;
 		case 'i':
-			if (key_id != -1)
+			if (key_id_set)
 				error_exit("Only one key id allowed");
 			key_id = atoi(optarg);
+			key_id_set = true;
 			if (type != FCS_CMD_TYPE_GEN_CS_KEY_OBJ) {
 				if ((key_type == -1) && (key_type != FCS_USER_KEY)) {
 					key_type = -1;
@@ -1050,6 +1053,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'f':
 			hpsfile = optarg;
+			break;
+		case 'q':
+			qkyfile = optarg;
 			break;
 		case 'v':
 			verbose = true;
@@ -1097,7 +1103,7 @@ int main(int argc, char *argv[])
 	} else if (type == FCS_CMD_TYPE_IMAGE_KEY_CANCEL) {
 		if (key_type == -1)
 			error_exit("Key Type parameter not set");
-		if (key_id == -1)
+		if (!key_id_set)
 			error_exit("Key ID parameter not set");
 
 		if (verbose)
@@ -1105,12 +1111,12 @@ int main(int argc, char *argv[])
 				__func__, __LINE__, type, key_type, key_id);
 		if (filename && (key_type != FCS_USER_KEY))
 			error_exit("Roothash filename only valid for User Keys");
-		if ((key_type == FCS_USER_KEY) && !filename)
-			error_exit("Roothash filename required for User Keys");
+		if ((key_type == FCS_USER_KEY) && !filename && !qkyfile)
+			error_exit("Roothash or qky file required for User Keys");
 		if ((key_type == FCS_USER_KEY) && (key_id > 31))
 			error_exit("Invalid Key ID parameter (Must be in range 0 to 31)");
 
-		fcs_prepare_key(key_type, key_id, filename, verbose);
+		fcs_prepare_key(key_type, key_id, filename, qkyfile, verbose);
 
 	} else if (type == FCS_CMD_TYPE_GEN_CS_KEY_OBJ) {
 		if (fcs_prepare_generate_cs_key_object(key_id, key_size,
